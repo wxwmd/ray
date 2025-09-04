@@ -789,13 +789,13 @@ class _ActorPool(AutoscalingActorPool):
     def actor_info_counts(self) -> Tuple[int, int, int]:
         """Returns Actor counts for Alive, Restarting and Pending Actors."""
         alive = self.num_alive_actors()
-        pending = self.num_pending_actors()
         restarting = self.num_restarting_actors()
-        return alive, pending, restarting
+        pending = self.num_pending_actors()
+        return alive, restarting, pending
 
     def actor_info_progress_str(self) -> str:
         """Returns Actor progress strings for Alive, Restarting and Pending Actors."""
-        alive, pending, restarting = self.actor_info_counts()
+        alive, restarting, pending = self.actor_info_counts()
         total = alive + pending + restarting
         if total == alive:
             return f"; Actors: {total}"
