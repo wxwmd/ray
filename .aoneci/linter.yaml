@@ -1,0 +1,22 @@
+name: Ray Format Check
+triggers:
+  push:
+    branches: '**'
+jobs:
+  ray-data-ut:
+    name: format-check
+    timeout: 30m
+    image: hub.docker.alibaba-inc.com/aidata/ray:format-check-20251124_accelerated
+    steps:
+      - uses: checkout
+      - id: pull-base-image
+        run: echo "pull image"
+        container:
+          credentials:
+            username: ${{secrets.dockerhub_user}}
+            password: ${{secrets.dockerhub_password}}
+      - uses: setup-github-proxy
+      - id: ruff-check
+        run: pre-commit run ruff --all-files --show-diff-on-failure
+      - id: black-check
+        run: pre-commit run black --all-files --show-diff-on-failure

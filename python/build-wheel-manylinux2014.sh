@@ -13,7 +13,8 @@ if [ "$EUID" -eq 0 ]; then
 
   # Create group and user
   groupadd -g "$HOST_GID" builduser
-  useradd -m -u "$HOST_UID" -g "$HOST_GID" -d /ray builduser
+  useradd -m -u "$HOST_UID" -g "$HOST_GID" -d /aoneci/runner/work/source builduser
+  chown -R builduser /aoneci/runner/work/source
 
   # Give sudo access
   echo "builduser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers

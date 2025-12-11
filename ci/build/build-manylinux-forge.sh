@@ -64,7 +64,7 @@ rm /tmp/node.tar.xz
 # Install bazel
 mkdir -p "$HOME"/bin
 if [[ "${ARCH}" == "x86_64" ]]; then
-  BAZELISK_URL="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-amd64"
+  BAZELISK_URL="http://ghp.alibaba-inc.com/https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-amd64"
 else # aarch64
   BAZELISK_URL="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-arm64"
 fi
