@@ -381,6 +381,53 @@ standard Python logger attributes to include in the log record. The default is a
 list. The list of already included standard attributes are: `asctime`, `levelname`,
 `message`, `filename`, `lineno`, `exc_text`. The list of all valid attributes are
 specified in the [Python logging library](http://docs.python.org/library/logging.html#logrecord-attributes).
+* `custom_log_filter`: The default is None, and the logs include Ray-specific fields such as `job_id`, `worker_id`, `node_id`. To customize the log format, provide a custom filter class that inherits from `logging.Filter`.
+    * Example:
+        ```python
+        import logging
+        from typing import Any, Dict
+        
+        import ray
+        
+        
+        class WorkerIdFilter(logging.Filter):
+            @classmethod
+            def get_ray_core_logging_context(cls) -> Dict[str, Any]:
+                if not ray.is_initialized():
+                    # There is no additional context if ray is not initialized
+                    return {}
+    
+                runtime_context = ray.get_runtime_context()
+                ray_core_logging_context = {
+                    "worker_id": runtime_context.get_worker_id(),
+                }
+                return ray_core_logging_context
+        
+            def filter(self, record):
+                context = self.get_ray_core_logging_context()
+                for key, value in context.items():
+                    if value:
+                        setattr(record, key, value)
+                return True
+      
+        ray.init(
+            logging_config=ray.LoggingConfig(
+                encoding="TEXT", log_level="INFO", custom_log_filter=WorkerIdFilter()
+            )
+        )
+      
+        @ray.remote
+        def f():
+            logger = logging.getLogger(__name__)
+            logger.info("This is a Ray task")
+    
+    
+        ray.get(f.remote())
+        ray.shutdown()
+      
+        # TODO
+        ```
+
 
 When you set up `logging_config` in `ray.init`, it configures the root loggers for the driver process, Ray actors, and Ray tasks.
 

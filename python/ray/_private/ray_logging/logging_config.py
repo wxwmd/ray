@@ -36,11 +36,15 @@ class DefaultLoggingConfigurator(LoggingConfigurator):
             logging_config.additional_log_standard_attrs
         )
 
-        core_context_filter = CoreContextFilter()
         handler = logging.StreamHandler()
         handler.setLevel(logging_config.log_level)
         handler.setFormatter(formatter)
-        handler.addFilter(core_context_filter)
+        log_filter = (
+            logging_config.custom_log_filter
+            if logging_config.custom_log_filter
+            else CoreContextFilter()
+        )
+        handler.addFilter(log_filter)
 
         root_logger = logging.getLogger()
         root_logger.setLevel(logging_config.log_level)
@@ -71,6 +75,8 @@ class LoggingConfig:
     # The list of valid attributes are defined as LOGRECORD_STANDARD_ATTRS in
     # constants.py.
     additional_log_standard_attrs: list = field(default_factory=list)
+    # A user-defined log filter that appends custom information to the end of each line.
+    custom_log_filter: logging.Filter = None
 
     def __post_init__(self):
         if self.encoding not in _logging_configurator.get_supported_encodings():
@@ -148,6 +154,58 @@ LoggingConfig.__doc__ = """
 
             {"asctime": "2025-02-12 12:25:48,766", "levelname": "INFO", "message": "This is a Ray task", "filename": "test-log-config.py", "lineno": 11, "name": "__main__", "job_id": "01000000", "worker_id": "6d307578014873fcdada0fa22ea6d49e0fb1f78960e69d61dfe41f5a", "node_id": "69e3a5e68bdc7eb8ac9abb3155326ee3cc9fc63ea1be04d11c0d93c7", "task_id": "c8ef45ccd0112571ffffffffffffffffffffffff01000000", "task_name": "f", "task_func_name": "test-log-config.f", "timestamp_ns": 1739391948766949000}
 
+    3. Configure the logging to use custom log filter.
+        .. testcode::
+        
+            import logging
+            from typing import Any, Dict
+            
+            import ray
+            
+            
+            class WorkerIdFilter(logging.Filter):
+                @classmethod
+                def get_ray_core_logging_context(cls) -> Dict[str, Any]:
+                    if not ray.is_initialized():
+                        # There is no additional context if ray is not initialized
+                        return {}
+            
+                    runtime_context = ray.get_runtime_context()
+                    ray_core_logging_context = {
+                        "worker_id": runtime_context.get_worker_id(),
+                    }
+                    return ray_core_logging_context
+            
+                def filter(self, record):
+                    context = self.get_ray_core_logging_context()
+                    for key, value in context.items():
+                        if value:
+                            setattr(record, key, value)
+                    return True
+            
+            
+            ray.init(
+                logging_config=ray.LoggingConfig(
+                    encoding="TEXT", log_level="INFO", custom_log_filter=WorkerIdFilter()
+                )
+            )
+            
+            
+            @ray.remote
+            def f():
+                logger = logging.getLogger(__name__)
+                logger.info("This is a Ray task")
+            
+            
+            ray.get(f.remote())
+            ray.shutdown()
+            
+        .. testoutput::
+            :options: +MOCK
+            TODO: fix
+            2025-02-12 12:25:16,836 INFO test-log-config.py:11 -- This is a Ray task name=__main__ job_id=01000000 worker_id=51188d9448be4664bf2ea26ac410b67acaaa970c4f31c5ad3ae776a5 node_id=f683dfbffe2c69984859bc19c26b77eaf3866c458884c49d115fdcd4 task_id=c8ef45ccd0112571ffffffffffffffffffffffff01000000 task_name=f task_func_name=test-log-config.f timestamp_ns=1739391916836884000
+            
+    
     Args:
         encoding: Encoding type for the logs. The valid values are
             {list(_logging_configurator.get_supported_encodings())}
@@ -158,4 +216,8 @@ LoggingConfig.__doc__ = """
             included standard attributes are: "asctime", "levelname", "message",
             "filename", "lineno", "exc_text". The list of valid attributes are specified
             here: http://docs.python.org/library/logging.html#logrecord-attributes
+        custom_log_filter: Custom log filter that inherits from logging.Filter. 
+            Within the filter(self, record) method, additional attributes are added
+            using setattr(record, key, value). These attributes will be appended to
+            the end of each log.
     """  # noqa: E501

@@ -262,5 +262,70 @@ assert old_test_logger.getEffectiveLevel() == logging.DEBUG
     run_string_as_driver(script)
 
 
+def test_custom_log_filter(shutdown_only):
+    """
+    Use a custom log filter to append content to the end of each log.
+    """
+    script = """
+import logging
+from typing import Any, Dict
+
+import ray
+
+
+class WorkerIdFilter(logging.Filter):
+    @classmethod
+    def get_ray_core_logging_context(cls) -> Dict[str, Any]:
+        if not ray.is_initialized():
+            # There is no additional context if ray is not initialized
+            return {}
+
+        runtime_context = ray.get_runtime_context()
+        ray_core_logging_context = {
+            "worker_id": runtime_context.get_worker_id(),
+        }
+        return ray_core_logging_context
+
+    def filter(self, record):
+        context = self.get_ray_core_logging_context()
+        for key, value in context.items():
+            if value:
+                setattr(record, key, value)
+        return True
+
+
+ray.init(
+    logging_config=ray.LoggingConfig(
+        encoding="TEXT", log_level="INFO", custom_log_filter=WorkerIdFilter()
+    )
+)
+
+
+@ray.remote
+def f():
+    logger = logging.getLogger(__name__)
+    logger.info("This is a Ray task")
+
+
+ray.get(f.remote())
+ray.shutdown()
+    """
+    stderr = run_string_as_driver(script)
+    should_exist = ["worker_id", "This is a Ray task"]
+    for s in should_exist:
+        assert s in stderr
+
+    should_not_exist = [
+        "actor_id",
+        "task_id",
+        "timestamp_ns",
+        "job_id",
+        "node_id",
+        "INFO",
+    ]
+    for s in should_not_exist:
+        assert s not in stderr
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-sv", __file__]))
