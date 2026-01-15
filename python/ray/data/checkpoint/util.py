@@ -1,15 +1,13 @@
 import logging
 from typing import Iterable
 
-from ray.types import ObjectRef
-
 import ray
-
 from ray.data._internal.execution.interfaces.task_context import TaskContext
 from ray.data.block import Block, BlockAccessor, DataBatch
 from ray.data.checkpoint.interfaces import (
     CheckpointConfig,
 )
+from ray.types import ObjectRef
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +26,7 @@ def filter_checkpointed_rows_for_blocks(
     from ray.data.checkpoint.checkpoint_filter import (
         BatchBasedCheckpointFilter,
     )
+
     job_id = ray.get_runtime_context().get_job_id()
     ckpt_filter = BatchBasedCheckpointFilter.options(
         name=f"checkpoint_filter_{job_id}",

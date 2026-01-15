@@ -9,31 +9,13 @@ import pyarrow
 import ray
 from ray.data._internal.arrow_ops import transform_pyarrow
 from ray.data._internal.execution.interfaces.ref_bundle import RefBundle
-from ray.data.block import Block, BlockAccessor, BlockMetadata, DataBatch, \
-    Schema
+from ray.data.block import Block, BlockAccessor, BlockMetadata, DataBatch, Schema
 from ray.data.checkpoint import CheckpointConfig
 from ray.data.datasource import PathPartitionFilter
 from ray.data.datasource.path_util import _unwrap_protocol
 from ray.types import ObjectRef
 
 logger = logging.getLogger(__name__)
-
-
-class CheckpointFilter(abc.ABC):
-    """Abstract class which defines the interface for filtering checkpointed rows
-    based on varying backends.
-    """
-
-    def __init__(self, config: CheckpointConfig):
-        self.ckpt_config = config
-        self.checkpoint_path = self.ckpt_config.checkpoint_path
-        self.checkpoint_path_unwrapped = _unwrap_protocol(
-            self.ckpt_config.checkpoint_path
-        )
-        self.id_column = self.ckpt_config.id_column
-        self.filesystem = self.ckpt_config.filesystem
-        self.filter_num_threads = self.ckpt_config.filter_num_threads
-        self.checkpointed_ids = None
 
 
 @ray.remote(max_retries=-1)
@@ -192,6 +174,24 @@ class IdColumnCheckpointLoader(CheckpointLoader):
         # Sort by the ID column.
         return checkpoint_ds.sort(self.id_column)
 
+
+class CheckpointFilter(abc.ABC):
+    """Abstract class which defines the interface for filtering checkpointed rows
+    based on varying backends.
+    """
+
+    def __init__(self, config: CheckpointConfig):
+        self.ckpt_config = config
+        self.checkpoint_path = self.ckpt_config.checkpoint_path
+        self.checkpoint_path_unwrapped = _unwrap_protocol(
+            self.ckpt_config.checkpoint_path
+        )
+        self.id_column = self.ckpt_config.id_column
+        self.filesystem = self.ckpt_config.filesystem
+        self.filter_num_threads = self.ckpt_config.filter_num_threads
+        self.checkpointed_ids = None
+
+
 @ray.remote
 class BatchBasedCheckpointFilter(CheckpointFilter):
     """CheckpointFilter for batch-based backends.
@@ -200,12 +200,9 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
     Every read task will send its input block to this actor and get the filtered result.
     """
 
-    def load_checkpoint(self):
-        """Load checkpointed ids as a sorted block.
-
-        Returns:
-            ObjectRef[numpy.ndarray]: ObjectRef to the checkpointed IDs array.
-        """
+    def __init__(self, config: CheckpointConfig):
+        super().__init__(config)
+        # load checkpoint
         loader = IdColumnCheckpointLoader(
             checkpoint_path=self.checkpoint_path,
             filesystem=self.filesystem,
@@ -251,7 +248,9 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
             valid_indices = sorted_indices < len(self.checkpointed_ids)
             # For valid indices, check for exact matches.
             potential_matches = sorted_indices[valid_indices]
-            matched = self.checkpointed_ids[potential_matches] == block_ids[valid_indices]
+            matched = (
+                self.checkpointed_ids[potential_matches] == block_ids[valid_indices]
+            )
             # Mark matched IDs as False (filter out these rows).
             mask[valid_indices] = ~matched
             return mask

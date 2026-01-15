@@ -1,9 +1,8 @@
 import logging
-from typing import Optional
 
 import numpy
-import ray
 
+import ray
 from ray.data._internal.execution.execution_callback import (
     ExecutionCallback,
     remove_execution_callback,
@@ -23,7 +22,7 @@ class LoadCheckpointCallback(ExecutionCallback):
         assert config is not None
         self._config = config
 
-        self._ckpt_filter_ref = self._create_checkpoint_filter(config)
+        self._ckpt_filter = None
 
     def _create_checkpoint_filter(
         self, config: CheckpointConfig
@@ -41,8 +40,8 @@ class LoadCheckpointCallback(ExecutionCallback):
     def before_execution_starts(self, executor: StreamingExecutor):
         assert self._config is executor._data_context.checkpoint_config
 
-        # Load checkpoint data before execution starts.
-        self._checkpoint_ref = self._ckpt_filter.load_checkpoint()
+        # create global checkpoint_filter actor
+        self._ckpt_filter = self._create_checkpoint_filter(self._config)
 
     def after_execution_succeeds(self, executor: StreamingExecutor):
         assert self._config is executor._data_context.checkpoint_config
@@ -52,7 +51,7 @@ class LoadCheckpointCallback(ExecutionCallback):
         # Delete checkpoint data.
         try:
             if self._config.delete_checkpoint_on_success:
-                self._ckpt_filter.delete_checkpoint()
+                self._ckpt_filter.delete_checkpoint.remote()
         except Exception:
             logger.warning("Failed to delete checkpoint data.", exc_info=True)
 
