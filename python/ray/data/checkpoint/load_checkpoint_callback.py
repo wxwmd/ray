@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 
 import numpy
+import ray
 
 from ray.data._internal.execution.execution_callback import (
     ExecutionCallback,
@@ -22,8 +23,7 @@ class LoadCheckpointCallback(ExecutionCallback):
         assert config is not None
         self._config = config
 
-        self._ckpt_filter = self._create_checkpoint_filter(config)
-        self._checkpoint_ref: Optional[ObjectRef[numpy.ndarray]] = None
+        self._ckpt_filter_ref = self._create_checkpoint_filter(config)
 
     def _create_checkpoint_filter(
         self, config: CheckpointConfig
@@ -32,7 +32,11 @@ class LoadCheckpointCallback(ExecutionCallback):
 
         Subclasses can override this to use a different filter implementation.
         """
-        return BatchBasedCheckpointFilter(config)
+        job_id = ray.get_runtime_context().get_job_id()
+        return BatchBasedCheckpointFilter.options(
+            name=f"checkpoint_filter_{job_id}",
+            get_if_exists=True,
+        ).remote(config)
 
     def before_execution_starts(self, executor: StreamingExecutor):
         assert self._config is executor._data_context.checkpoint_config

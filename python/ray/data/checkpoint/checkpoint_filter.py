@@ -1,6 +1,5 @@
 import abc
 import logging
-import os
 import time
 from typing import List, Optional
 
@@ -10,13 +9,12 @@ import pyarrow
 import ray
 from ray.data._internal.arrow_ops import transform_pyarrow
 from ray.data._internal.execution.interfaces.ref_bundle import RefBundle
-from ray.data.block import Block, BlockAccessor, BlockMetadata, DataBatch, Schema
+from ray.data.block import Block, BlockAccessor, BlockMetadata, DataBatch, \
+    Schema
 from ray.data.checkpoint import CheckpointConfig
 from ray.data.datasource import PathPartitionFilter
 from ray.data.datasource.path_util import _unwrap_protocol
 from ray.types import ObjectRef
-
-import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +33,7 @@ class CheckpointFilter(abc.ABC):
         self.id_column = self.ckpt_config.id_column
         self.filesystem = self.ckpt_config.filesystem
         self.filter_num_threads = self.ckpt_config.filter_num_threads
+        self.checkpointed_ids = None
 
 
 @ray.remote(max_retries=-1)
@@ -193,11 +192,15 @@ class IdColumnCheckpointLoader(CheckpointLoader):
         # Sort by the ID column.
         return checkpoint_ds.sort(self.id_column)
 
-
+@ray.remote
 class BatchBasedCheckpointFilter(CheckpointFilter):
-    """CheckpointFilter for batch-based backends."""
+    """CheckpointFilter for batch-based backends.
 
-    def load_checkpoint(self) -> ObjectRef[numpy.ndarray]:
+    This is a global actor that holds checkpoint_ids array.
+    Every read task will send its input block to this actor and get the filtered result.
+    """
+
+    def load_checkpoint(self):
         """Load checkpointed ids as a sorted block.
 
         Returns:
@@ -209,53 +212,29 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
             id_column=self.id_column,
             checkpoint_path_partition_filter=self.ckpt_config.checkpoint_path_partition_filter,
         )
-        return loader.load_checkpoint()
+        self.checkpointed_ids = ray.get(loader.load_checkpoint())
+        assert isinstance(self.checkpointed_ids, numpy.ndarray)
 
     def delete_checkpoint(self) -> None:
         self.filesystem.delete_dir(self.checkpoint_path_unwrapped)
 
-    def _warn_on_insufficient_memory(self):
-        """When using checkpoints, each read process needs to maintain checkpointed_ids
-        to filter the input blocks. This will increase the memory usage of each process.
-        When there is a potential risk of OOM, this function warn the user.
-
-        """
-        process = psutil.Process(os.getpid())
-        process_memory_usage = process.memory_info().rss
-        node_memory = psutil.virtual_memory()
-        # This node can not accept more read task
-        if process_memory_usage > node_memory.available:
-            logger.warning(
-                "Memory usage of current node: %.1f%%, per read task costs at least %d bytes."
-                ' To prevent oom, set ray_remote_args={"memory": ${memory}} in ray.data.read_datasource()'
-                " and make sure ${memory} > %d",
-                node_memory.percent,
-                process_memory_usage,
-                process_memory_usage,
-            )
-
     def filter_rows_for_block(
         self,
         block: Block,
-        checkpointed_ids: numpy.ndarray,
     ) -> Block:
         """For the given block, filter out rows that have already
         been checkpointed, and return the resulting block.
 
         Args:
             block: The input block to filter.
-            checkpointed_ids: A numpy ndarray containing IDs of all rows that have
-                been checkpointed.
         Returns:
             A new block with rows that have not been checkpointed.
         """
 
-        if checkpointed_ids.shape[0] == 0 or len(block) == 0:
+        if self.checkpointed_ids.shape[0] == 0 or len(block) == 0:
             return block
 
         assert isinstance(block, pyarrow.Table)
-        assert isinstance(checkpointed_ids, numpy.ndarray)
-        self._warn_on_insufficient_memory()
 
         # The checkpointed_ids block is sorted (see load_checkpoint).
         # We'll use binary search to filter out processed rows.
@@ -267,12 +246,12 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
             # Start with a mask of all True (keep all rows).
             mask = numpy.ones(len(block_ids), dtype=bool)
             # Use binary search to find where block_ids would be in ckpt_ids.
-            sorted_indices = numpy.searchsorted(checkpointed_ids, block_ids)
+            sorted_indices = numpy.searchsorted(self.checkpointed_ids, block_ids)
             # Only consider indices that are within bounds.
-            valid_indices = sorted_indices < len(checkpointed_ids)
+            valid_indices = sorted_indices < len(self.checkpointed_ids)
             # For valid indices, check for exact matches.
             potential_matches = sorted_indices[valid_indices]
-            matched = checkpointed_ids[potential_matches] == block_ids[valid_indices]
+            matched = self.checkpointed_ids[potential_matches] == block_ids[valid_indices]
             # Mark matched IDs as False (filter out these rows).
             mask[valid_indices] = ~matched
             return mask
