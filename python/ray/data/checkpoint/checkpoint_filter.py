@@ -212,6 +212,9 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
         self.checkpointed_ids = ray.get(loader.load_checkpoint())
         assert isinstance(self.checkpointed_ids, numpy.ndarray)
 
+    def ready(self):
+        return True
+
     def delete_checkpoint(self) -> None:
         self.filesystem.delete_dir(self.checkpoint_path_unwrapped)
 

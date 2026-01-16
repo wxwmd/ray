@@ -26,11 +26,11 @@ class LoadCheckpointCallback(ExecutionCallback):
     ) -> BatchBasedCheckpointFilter:
         """Create the global checkpoint filter."""
         job_id = ray.get_runtime_context().get_job_id()
-        actor_ref = BatchBasedCheckpointFilter.options(
+        actor = BatchBasedCheckpointFilter.options(
             name=f"checkpoint_filter_{job_id}",
             get_if_exists=True,
         ).remote(config)
-        ray.get(actor_ref)
+        ray.get(actor.ready.remote())
         print("create checkpoint filter done")
 
     def before_execution_starts(self, executor: StreamingExecutor):
