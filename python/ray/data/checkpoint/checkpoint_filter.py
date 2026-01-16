@@ -127,13 +127,13 @@ class CheckpointLoader:
     def _postprocess_block(self, block_ref: ObjectRef[Block]) -> numpy.ndarray:
 
         print(
-            f"post process start, available: {psutil.virtual_memory() / (1024 ** 3)} GB"
+            f"post process start, available: {psutil.virtual_memory().available / (1024 ** 3)} GB"
         )
 
         checkpointed_ids = ray.get(block_ref)
         ckpt_chunks = checkpointed_ids[self.id_column].chunks
 
-        print(f"get chunks, available: {psutil.virtual_memory() / (1024 ** 3)} GB")
+        print(f"get chunks, available: {psutil.virtual_memory().available / (1024 ** 3)} GB")
 
         checkpoint_ids_array = []
 
@@ -143,7 +143,7 @@ class CheckpointLoader:
             )
         result = numpy.concatenate(checkpoint_ids_array)
 
-        print(f"get result, available: {psutil.virtual_memory() / (1024 ** 3)} GB")
+        print(f"get result, available: {psutil.virtual_memory().available / (1024 ** 3)} GB")
 
         return result
 
