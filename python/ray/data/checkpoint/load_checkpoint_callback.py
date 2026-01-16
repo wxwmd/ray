@@ -24,21 +24,20 @@ class LoadCheckpointCallback(ExecutionCallback):
     def _create_checkpoint_filter(
         self, config: CheckpointConfig
     ) -> BatchBasedCheckpointFilter:
-        """Factory method to create the checkpoint filter.
-
-        Subclasses can override this to use a different filter implementation.
-        """
+        """Create the global checkpoint filter."""
         job_id = ray.get_runtime_context().get_job_id()
-        return BatchBasedCheckpointFilter.options(
+        actor_ref = BatchBasedCheckpointFilter.options(
             name=f"checkpoint_filter_{job_id}",
             get_if_exists=True,
         ).remote(config)
+        ray.get(actor_ref)
+        print("create checkpoint filter done")
 
     def before_execution_starts(self, executor: StreamingExecutor):
         assert self._config is executor._data_context.checkpoint_config
 
         # create global checkpoint_filter actor
-        self._ckpt_filter = self._create_checkpoint_filter(self._config)
+        self._create_checkpoint_filter(self._config)
 
     def after_execution_succeeds(self, executor: StreamingExecutor):
         assert self._config is executor._data_context.checkpoint_config
