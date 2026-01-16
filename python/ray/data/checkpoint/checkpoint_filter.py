@@ -15,47 +15,31 @@ from ray.data.datasource import PathPartitionFilter
 from ray.data.datasource.path_util import _unwrap_protocol
 from ray.types import ObjectRef
 
+import psutil
+
 logger = logging.getLogger(__name__)
 
 
-@ray.remote(max_retries=-1)
-def _combine_chunks(ckpt_block: pyarrow.Table, id_column: str) -> numpy.ndarray:
+def _combine_chunks(ckpt_block: pyarrow.Table) -> pyarrow.Table:
     """Combine chunks for the checkpoint block.
 
     Args:
         ckpt_block: The checkpoint block to combine chunks for
-        id_column: The id column
 
     Returns:
-        The numpy.ndarray of combined checkpoint block
+        The combined checkpoint block
     """
+    from ray.data._internal.arrow_ops.transform_pyarrow import combine_chunks
 
-    # Combine chunks of ckpt_block
-    combined_ckpt_block = transform_pyarrow.combine_chunks(ckpt_block)
+    combined_ckpt_block = combine_chunks(ckpt_block)
     logger.debug(
         "Checkpoint block stats for id column checkpoint: Combined block: type=%s, %d rows, %d bytes",
         combined_ckpt_block.schema.to_string(),
         combined_ckpt_block.num_rows,
         combined_ckpt_block.nbytes,
     )
-    if combined_ckpt_block.num_rows == 0:
-        return numpy.array([])
 
-    # In some cases(e.g., the size of combined_ckpt_block[id_column] > 2GB), there may be multiple chunks.
-    combine_ckpt_chunks = combined_ckpt_block[id_column].chunks
-
-    logger.debug(
-        "Checkpoint stats for id column chunks: Num of chunks: %d",
-        len(combine_ckpt_chunks),
-    )
-
-    # Convert checkpoint chunk to numpy for fast search.
-    # Use internal helper function for consistency and robustness (handles null-typed arrays, etc.)
-    ckpt_arrays = []
-    for chunk in combine_ckpt_chunks:
-        ckpt_arrays.append(transform_pyarrow.to_numpy(chunk, zero_copy_only=False))
-    final_ckpt_array = numpy.concatenate(ckpt_arrays)
-    return final_ckpt_array
+    return combined_ckpt_block
 
 
 class CheckpointLoader:
@@ -82,11 +66,11 @@ class CheckpointLoader:
         self.id_column = id_column
         self.checkpoint_path_partition_filter = checkpoint_path_partition_filter
 
-    def load_checkpoint(self) -> ObjectRef[numpy.ndarray]:
+    def load_checkpoint(self) -> numpy.ndarray:
         """Loading checkpoint data.
 
         Returns:
-            ObjectRef[numpy.ndarray]: ObjectRef to the checkpointed IDs array.
+            numpy.ndarray: The checkpointed IDs array.
         """
         start_t = time.time()
 
@@ -119,9 +103,7 @@ class CheckpointLoader:
         metadata: BlockMetadata = ref_bundle.blocks[0][1]
 
         # Post-process the block
-        checkpoint_ndarray_ref: ObjectRef[numpy.ndarray] = self._postprocess_block(
-            block_ref
-        )
+        checkpoint_ndarray: numpy.ndarray = self._postprocess_block(block_ref)
 
         # Validate the loaded checkpoint
         self._validate_loaded_checkpoint(schema, metadata)
@@ -133,7 +115,7 @@ class CheckpointLoader:
             metadata.size_bytes,
             schema.to_string(),
         )
-        return checkpoint_ndarray_ref
+        return checkpoint_ndarray
 
     @abc.abstractmethod
     def _preprocess_data_pipeline(
@@ -142,11 +124,28 @@ class CheckpointLoader:
         """Pre-process the checkpoint dataset. To be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement this method")
 
-    def _postprocess_block(
-        self, block_ref: ObjectRef[Block]
-    ) -> ObjectRef[numpy.ndarray]:
-        """Combine the block so it has fewer chunks."""
-        return _combine_chunks.remote(block_ref, self.id_column)
+    def _postprocess_block(self, block_ref: ObjectRef[Block]) -> numpy.ndarray:
+
+        print(
+            f"post process start, available: {psutil.virtual_memory() / (1024 ** 3)} GB"
+        )
+
+        checkpointed_ids = ray.get(block_ref)
+        ckpt_chunks = checkpointed_ids[self.id_column].chunks
+
+        print(f"get chunks, available: {psutil.virtual_memory() / (1024 ** 3)} GB")
+
+        checkpoint_ids_array = []
+
+        for ckpt_chunk in ckpt_chunks:
+            checkpoint_ids_array.append(
+                transform_pyarrow.to_numpy(ckpt_chunk, zero_copy_only=False)
+            )
+        result = numpy.concatenate(checkpoint_ids_array)
+
+        print(f"get result, available: {psutil.virtual_memory() / (1024 ** 3)} GB")
+
+        return result
 
     def _validate_loaded_checkpoint(
         self, schema: Schema, metadata: BlockMetadata
@@ -209,7 +208,7 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
             id_column=self.id_column,
             checkpoint_path_partition_filter=self.ckpt_config.checkpoint_path_partition_filter,
         )
-        self.checkpointed_ids = ray.get(loader.load_checkpoint())
+        self.checkpointed_ids = loader.load_checkpoint()
         assert isinstance(self.checkpointed_ids, numpy.ndarray)
 
     def ready(self):
