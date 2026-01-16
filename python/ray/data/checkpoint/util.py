@@ -28,10 +28,7 @@ def filter_checkpointed_rows_for_blocks(
     )
 
     job_id = ray.get_runtime_context().get_job_id()
-    ckpt_filter = BatchBasedCheckpointFilter.options(
-        name=f"checkpoint_filter_{job_id}",
-        get_if_exists=True,
-    ).remote(checkpoint_config)
+    ckpt_filter = ray.get_actor(f"checkpoint_filter_{job_id}")
 
     def filter_fn(block: Block) -> ObjectRef[Block]:
         return ckpt_filter.filter_rows_for_block.remote(
@@ -39,6 +36,7 @@ def filter_checkpointed_rows_for_blocks(
         )
 
     for block in blocks:
+        print(f"Filtering rows for block, block: {block}")
         filtered_block = ray.get(filter_fn(block))
         ba = BlockAccessor.for_block(filtered_block)
         if ba.num_rows() > 0:
