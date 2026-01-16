@@ -23,9 +23,6 @@ def filter_checkpointed_rows_for_blocks(
 ) -> Iterable[Block]:
     """For each block, filter rows that have already been checkpointed
     and yield the resulting block."""
-    from ray.data.checkpoint.checkpoint_filter import (
-        BatchBasedCheckpointFilter,
-    )
 
     job_id = ray.get_runtime_context().get_job_id()
     ckpt_filter = ray.get_actor(f"checkpoint_filter_{job_id}")
