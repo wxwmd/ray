@@ -133,7 +133,9 @@ class CheckpointLoader:
         checkpointed_ids = ray.get(block_ref)
         ckpt_chunks = checkpointed_ids[self.id_column].chunks
 
-        print(f"get chunks, available: {psutil.virtual_memory().available / (1024 ** 3)} GB")
+        print(
+            f"get chunks, available: {psutil.virtual_memory().available / (1024 ** 3)} GB"
+        )
 
         checkpoint_ids_array = []
 
@@ -143,7 +145,9 @@ class CheckpointLoader:
             )
         result = numpy.concatenate(checkpoint_ids_array)
 
-        print(f"get result, available: {psutil.virtual_memory().available / (1024 ** 3)} GB")
+        print(
+            f"get result, available: {psutil.virtual_memory().available / (1024 ** 3)} GB"
+        )
 
         return result
 
@@ -201,6 +205,11 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
 
     def __init__(self, config: CheckpointConfig):
         super().__init__(config)
+
+        print(
+            f"init filter, available: {psutil.virtual_memory().available / (1024 ** 3)} GB"
+        )
+
         # load checkpoint
         loader = IdColumnCheckpointLoader(
             checkpoint_path=self.checkpoint_path,
@@ -209,6 +218,10 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
             checkpoint_path_partition_filter=self.ckpt_config.checkpoint_path_partition_filter,
         )
         self.checkpointed_ids = loader.load_checkpoint()
+
+        print(
+            f"get checkpoint, available: {psutil.virtual_memory().available / (1024 ** 3)} GB"
+        )
         assert isinstance(self.checkpointed_ids, numpy.ndarray)
 
     def ready(self):
@@ -235,11 +248,19 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
 
         assert isinstance(block, pyarrow.Table)
 
+        print(
+            f"Filtering rows for block, block: {block.num_rows}, available: {psutil.virtual_memory().available / (1024 ** 3)} GB"
+        )
+
         # The checkpointed_ids block is sorted (see load_checkpoint).
         # We'll use binary search to filter out processed rows.
 
         # Convert the block's ID column to a numpy array for fast processing.
         block_ids = block[self.id_column].to_numpy()
+
+        print(
+            f"get block_ids, available: {psutil.virtual_memory().available / (1024 ** 3)} GB"
+        )
 
         def filter_with_ckpt() -> numpy.ndarray:
             # Start with a mask of all True (keep all rows).
@@ -258,6 +279,11 @@ class BatchBasedCheckpointFilter(CheckpointFilter):
             return mask
 
         mask = filter_with_ckpt()
+
+        print(
+            f"get mask, available: {psutil.virtual_memory().available / (1024 ** 3)} GB"
+        )
+
         # Convert the final mask to a PyArrow array and filter the block.
         mask_array = pyarrow.array(mask)
         filtered_block = block.filter(mask_array)
